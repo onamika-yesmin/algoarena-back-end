@@ -26,6 +26,13 @@ app.get("/", (req, res) => {
         message: "AlgoArena Backend is running",
     });
 });
+app.get("/api/health", (_req, res) => {
+    res.status(200).json({
+        success: true,
+        message: "AlgoArena API is healthy",
+        data: { timestamp: new Date().toISOString() },
+    });
+});
 
 // Mount real module routes here, e.g.
 app.use("/api/auth", authRouter);
