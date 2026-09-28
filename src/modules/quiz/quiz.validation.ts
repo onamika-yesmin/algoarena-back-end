@@ -1,0 +1,92 @@
+import { Types } from "mongoose";
+import { z } from "zod";
+import { QuestionDifficulty, SessionMode } from "./quiz.interface.js";
+
+const isValidObjectId = (val: string) => Types.ObjectId.isValid(val);
+
+export const startQuizSessionSchema = z.object({
+  body: z
+    .object({
+      topic: z
+        .string({ required_error: "Topic is required" })
+        .min(1, "Topic cannot be empty")
+        .trim()
+        .toLowerCase(),
+      difficulty: z.nativeEnum(QuestionDifficulty, {
+        errorMap: () => ({
+          message: "Difficulty must be EASY, MEDIUM, or HARD",
+        }),
+      }),
+      mode: z.nativeEnum(SessionMode, {
+        errorMap: () => ({
+          message: "Mode must be PRACTICE or EXAM",
+        }),
+      }),
+      count: z
+        .number()
+        .int("Count must be an integer")
+        .min(1, "Count must be at least 1")
+        .optional()
+        .default(5),
+    })
+    .superRefine((data, ctx) => {
+      const maxAllowed = data.mode === SessionMode.EXAM ? 50 : 100;
+      if (data.count > maxAllowed) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `${data.mode} mode count cannot exceed ${maxAllowed} questions`,
+          path: ["count"],
+        });
+      }
+    }),
+});
+
+export const submitQuizAnswersSchema = z.object({
+  params: z.object({
+    sessionId: z
+      .string({ required_error: "Session ID is required" })
+      .refine(isValidObjectId, { message: "Invalid session ID format" }),
+  }),
+  body: z.object({
+    answers: z
+      .array(
+        z.object({
+          questionId: z
+            .string({ required_error: "Question ID is required" })
+            .refine(isValidObjectId, { message: "Invalid question ID format" }),
+          userAnswer: z.union([z.number(), z.string()], {
+            errorMap: () => ({
+              message: "User answer must be a number or string",
+            }),
+          }),
+          timeTakenSeconds: z
+            .number()
+            .min(0, "Time taken cannot be negative")
+            .default(0),
+        }),
+      )
+      .min(1, "At least one answer must be submitted"),
+  }),
+});
+
+export const adminGenerateBatchSchema = z.object({
+  body: z.object({
+    topic: z
+      .string({ required_error: "Topic is required" })
+      .min(1, "Topic cannot be empty")
+      .trim()
+      .toLowerCase(),
+    difficulty: z.nativeEnum(QuestionDifficulty, {
+      errorMap: () => ({
+        message: "Difficulty must be EASY, MEDIUM, or HARD",
+      }),
+    }),
+    count: z
+      .number()
+      .int("Count must be an integer")
+      .min(1, "Count must be at least 1")
+      .max(20, "Count cannot exceed 20 questions")
+      .optional()
+      .default(10),
+  }),
+});

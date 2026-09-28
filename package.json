@@ -7,7 +7,8 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "seed": "tsx src/scripts/seed.ts"
+    "seed": "tsx src/scripts/seed.ts",
+    "seed:quizzes": "tsx src/scripts/seedQuizzes.ts"
   },
   "dependencies": {
     "axios": "^1.19.0",
