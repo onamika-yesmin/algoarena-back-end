@@ -69,4 +69,12 @@ router.post(
   quizController.generateBatchAsync,
 );
 
+// POST /api/quiz/admin/auto-flag -> Require Admin -> Triggers Quality Control outlier auto-flagging audit
+router.post(
+  "/admin/auto-flag",
+  requireAuth,
+  requireAdmin,
+  quizController.autoFlagOutliers,
+);
+
 export const quizRouter = router;

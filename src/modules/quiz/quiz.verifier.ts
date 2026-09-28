@@ -232,10 +232,7 @@ export const verifyQuestionsBatch = async (
       correctAnswer: rawQ.correctAnswer,
       explanation: rawQ.explanation,
       verificationStatus,
-      status:
-        verificationStatus === VerificationStatus.VERIFIED
-          ? QuestionStatus.APPROVED
-          : QuestionStatus.REJECTED,
+      status: QuestionStatus.PENDING_REVIEW,
       dedupHash,
       verificationNotes,
     });

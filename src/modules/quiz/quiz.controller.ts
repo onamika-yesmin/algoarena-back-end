@@ -12,6 +12,7 @@ import {
   getPendingQuizQuestions,
   reviewQuizQuestion,
   triggerAsyncQuizGeneration,
+  autoFlagOutlierQuestions,
 } from "./quiz.service.js";
 import {
   IStartQuizRequest,
@@ -121,13 +122,14 @@ const generateBulk = catchAsync(
  */
 const getPendingQuestions = catchAsync(
   async (req: AuthenticatedRequest, res: Response) => {
-    const { page, limit, topic, difficulty } = req.query;
+    const { page, limit, topic, difficulty, status } = req.query;
 
     const result = await getPendingQuizQuestions({
       page: page ? Number(page) : undefined,
       limit: limit ? Number(limit) : undefined,
       topic: topic ? String(topic) : undefined,
       difficulty: difficulty ? (difficulty as QuestionDifficulty) : undefined,
+      status: status ? String(status) : undefined,
     });
 
     sendResponse(res, {
@@ -195,6 +197,23 @@ const generateBatchAsync = catchAsync(
   },
 );
 
+/**
+ * POST /api/quiz/admin/auto-flag
+ * - Triggers Quality Control audit loop to flag low/high accuracy outlier questions
+ */
+const autoFlagOutliers = catchAsync(
+  async (_req: AuthenticatedRequest, res: Response) => {
+    const result = await autoFlagOutlierQuestions();
+
+    sendResponse(res, {
+      success: true,
+      statusCode: httpStatus.OK,
+      message: `Quality Control audit complete. Inspected ${result.inspectedCount} questions, flagged ${result.flaggedLowAccuracyCount + result.flaggedHighAccuracyCount} outliers.`,
+      data: result,
+    });
+  },
+);
+
 export const quizController = {
   startQuiz,
   submitQuiz,
@@ -203,4 +222,5 @@ export const quizController = {
   getPendingQuestions,
   reviewQuestion,
   generateBatchAsync,
+  autoFlagOutliers,
 };

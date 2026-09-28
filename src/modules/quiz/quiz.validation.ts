@@ -107,6 +107,7 @@ export const getPendingQuestionsSchema = z.object({
       .transform((val) => (val ? Number(val) : 10)),
     topic: z.string().optional(),
     difficulty: z.nativeEnum(QuestionDifficulty).optional(),
+    status: z.string().optional(),
   }),
 });
 

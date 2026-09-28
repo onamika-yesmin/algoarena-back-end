@@ -390,14 +390,19 @@ export const getPendingQuizQuestions = async (query: {
   limit?: number;
   topic?: string;
   difficulty?: QuestionDifficulty;
+  status?: string;
 }) => {
   const page = Math.max(Number(query.page) || 1, 1);
   const limit = Math.min(Math.max(Number(query.limit) || 10, 1), 50);
   const skip = (page - 1) * limit;
 
-  const filter: Record<string, unknown> = {
-    status: QuestionStatus.PENDING_REVIEW,
-  };
+  const filter: Record<string, unknown> = {};
+
+  if (query.status && query.status.toLowerCase() !== "all") {
+    filter.status = query.status;
+  } else if (!query.status) {
+    filter.status = QuestionStatus.PENDING_REVIEW;
+  }
 
   if (query.topic) {
     filter.topic = query.topic.trim().toLowerCase();
@@ -406,13 +411,17 @@ export const getPendingQuizQuestions = async (query: {
     filter.difficulty = query.difficulty;
   }
 
-  const [total, questions] = await Promise.all([
+  const [total, questions, pendingCount, approvedCount, rejectedCount, allCount] = await Promise.all([
     QuizQuestionModel.countDocuments(filter),
     QuizQuestionModel.find(filter)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
       .lean(),
+    QuizQuestionModel.countDocuments({ status: QuestionStatus.PENDING_REVIEW }),
+    QuizQuestionModel.countDocuments({ status: QuestionStatus.APPROVED }),
+    QuizQuestionModel.countDocuments({ status: QuestionStatus.REJECTED }),
+    QuizQuestionModel.countDocuments({}),
   ]);
 
   return {
@@ -422,6 +431,12 @@ export const getPendingQuizQuestions = async (query: {
       limit,
       total,
       totalPages: Math.ceil(total / limit) || 1,
+    },
+    statusCounts: {
+      pending: pendingCount,
+      approved: approvedCount,
+      rejected: rejectedCount,
+      all: allCount,
     },
   };
 };
@@ -511,4 +526,61 @@ export const triggerAsyncQuizGeneration = (options: {
       );
     }
   });
+};
+
+/**
+ * 8. Quality Control Loop & Nightly Auto-Flagging Task
+ * - Scans active/approved questions in QuizQuestionModel.
+ * - Flagging Rules:
+ *   a) attemptsCount >= 30 && accuracyRate < 10%: Low accuracy outlier (broken/ambiguous/incorrect key)
+ *      -> Status set back to 'pending_review', verificationStatus to 'failed', with notes.
+ *   b) attemptsCount >= 30 && accuracyRate > 98%: High accuracy outlier (too trivial or leaked)
+ *      -> Status set back to 'pending_review', verificationStatus to 'failed', with notes.
+ */
+export const autoFlagOutlierQuestions = async (): Promise<{
+  inspectedCount: number;
+  flaggedLowAccuracyCount: number;
+  flaggedHighAccuracyCount: number;
+  flaggedQuestionIds: string[];
+}> => {
+  const candidateQuestions = await QuizQuestionModel.find({
+    status: QuestionStatus.APPROVED,
+    "metrics.attemptsCount": { $gte: 30 },
+  });
+
+  let flaggedLowAccuracyCount = 0;
+  let flaggedHighAccuracyCount = 0;
+  const flaggedQuestionIds: string[] = [];
+
+  for (const q of candidateQuestions) {
+    const attempts = q.metrics?.attemptsCount || 0;
+    const accuracy = q.metrics?.accuracyRate ?? 50;
+
+    if (attempts >= 30 && accuracy < 10) {
+      q.status = QuestionStatus.PENDING_REVIEW;
+      q.verificationStatus = VerificationStatus.FAILED;
+      q.verificationNotes = `QC Auto-Flagged: Low Accuracy Outlier (${accuracy}% accuracy across ${attempts} attempts). Question may be ambiguous or have wrong answer key.`;
+      await q.save();
+      flaggedLowAccuracyCount++;
+      flaggedQuestionIds.push(String(q._id));
+    } else if (attempts >= 30 && accuracy > 98) {
+      q.status = QuestionStatus.PENDING_REVIEW;
+      q.verificationStatus = VerificationStatus.FAILED;
+      q.verificationNotes = `QC Auto-Flagged: High Accuracy Trivial Outlier (${accuracy}% accuracy across ${attempts} attempts). Question may be too trivial or leaked.`;
+      await q.save();
+      flaggedHighAccuracyCount++;
+      flaggedQuestionIds.push(String(q._id));
+    }
+  }
+
+  console.log(
+    `[Quality Control Loop] Audited ${candidateQuestions.length} questions. Flagged ${flaggedLowAccuracyCount} low-accuracy outliers & ${flaggedHighAccuracyCount} high-accuracy outliers.`
+  );
+
+  return {
+    inspectedCount: candidateQuestions.length,
+    flaggedLowAccuracyCount,
+    flaggedHighAccuracyCount,
+    flaggedQuestionIds,
+  };
 };
