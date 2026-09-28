@@ -9,8 +9,15 @@ import {
   submitQuizAnswers,
   getQuizSessionResult,
   generateAndIngestQuizBatch,
+  getPendingQuizQuestions,
+  reviewQuizQuestion,
+  triggerAsyncQuizGeneration,
 } from "./quiz.service.js";
-import { IStartQuizRequest, ISubmitQuizRequest } from "./quiz.interface.js";
+import {
+  IStartQuizRequest,
+  ISubmitQuizRequest,
+  QuestionDifficulty,
+} from "./quiz.interface.js";
 
 /**
  * POST /api/quiz/start
@@ -108,9 +115,92 @@ const generateBulk = catchAsync(
   },
 );
 
+/**
+ * GET /api/quiz/admin/pending
+ * - Admin endpoint to fetch paginated list of pending review questions
+ */
+const getPendingQuestions = catchAsync(
+  async (req: AuthenticatedRequest, res: Response) => {
+    const { page, limit, topic, difficulty } = req.query;
+
+    const result = await getPendingQuizQuestions({
+      page: page ? Number(page) : undefined,
+      limit: limit ? Number(limit) : undefined,
+      topic: topic ? String(topic) : undefined,
+      difficulty: difficulty ? (difficulty as QuestionDifficulty) : undefined,
+    });
+
+    sendResponse(res, {
+      success: true,
+      statusCode: httpStatus.OK,
+      message: "Pending review quiz questions loaded successfully",
+      data: result,
+    });
+  },
+);
+
+/**
+ * PATCH /api/quiz/admin/:id/review
+ * - Admin endpoint to approve, reject, or edit a pending question
+ */
+const reviewQuestion = catchAsync(
+  async (req: AuthenticatedRequest, res: Response) => {
+    const questionId = req.params.id as string;
+    const { action, updateData } = req.body;
+
+    const updatedQuestion = await reviewQuizQuestion(
+      questionId,
+      action,
+      updateData,
+    );
+
+    sendResponse(res, {
+      success: true,
+      statusCode: httpStatus.OK,
+      message: `Quiz question successfully updated with action '${action}'`,
+      data: updatedQuestion,
+    });
+  },
+);
+
+/**
+ * POST /api/quiz/admin/generate-batch
+ * - Non-blocking admin endpoint: returns HTTP 202 Accepted immediately,
+ *   and executes generation asynchronously in the background.
+ */
+const generateBatchAsync = catchAsync(
+  async (req: AuthenticatedRequest, res: Response) => {
+    const { topic, difficulty, count, type } = req.body;
+
+    // Trigger non-blocking background job
+    triggerAsyncQuizGeneration({
+      topic,
+      difficulty,
+      count,
+      type,
+    });
+
+    sendResponse(res, {
+      success: true,
+      statusCode: httpStatus.ACCEPTED,
+      message:
+        "AI Quiz question generation started in the background. Questions will appear in the review queue shortly.",
+      data: {
+        topic,
+        difficulty,
+        count: count || 10,
+        status: "processing_in_background",
+      },
+    });
+  },
+);
+
 export const quizController = {
   startQuiz,
   submitQuiz,
   getQuizResult,
   generateBulk,
+  getPendingQuestions,
+  reviewQuestion,
+  generateBatchAsync,
 };

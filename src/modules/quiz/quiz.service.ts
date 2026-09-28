@@ -12,6 +12,7 @@ import {
   QuestionDifficulty,
   QuestionStatus,
   QuestionType,
+  VerificationStatus,
   SessionMode,
   SessionStatus,
 } from "./quiz.interface.js";
@@ -378,4 +379,136 @@ export const generateAndIngestQuizBatch = async (options: {
     failedVerificationCount: verifyResult.failedVerificationCount,
     questions: insertedDocs,
   };
+};
+
+/**
+ * 5. Get Paginated Pending Quiz Questions (Admin Queue)
+ * - Returns questions filtered by status 'pending_review'
+ */
+export const getPendingQuizQuestions = async (query: {
+  page?: number;
+  limit?: number;
+  topic?: string;
+  difficulty?: QuestionDifficulty;
+}) => {
+  const page = Math.max(Number(query.page) || 1, 1);
+  const limit = Math.min(Math.max(Number(query.limit) || 10, 1), 50);
+  const skip = (page - 1) * limit;
+
+  const filter: Record<string, unknown> = {
+    status: QuestionStatus.PENDING_REVIEW,
+  };
+
+  if (query.topic) {
+    filter.topic = query.topic.trim().toLowerCase();
+  }
+  if (query.difficulty) {
+    filter.difficulty = query.difficulty;
+  }
+
+  const [total, questions] = await Promise.all([
+    QuizQuestionModel.countDocuments(filter),
+    QuizQuestionModel.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+  ]);
+
+  return {
+    questions,
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit) || 1,
+    },
+  };
+};
+
+export type ReviewAction = "approve" | "reject" | "edit";
+
+export interface IEditQuizQuestionPayload {
+  questionText?: string;
+  options?: string[];
+  correctAnswer?: number | string;
+  explanation?: string;
+  codeSnippet?: { language: string; code: string };
+  topic?: string;
+  difficulty?: QuestionDifficulty;
+}
+
+/**
+ * 6. Review Quiz Question (Admin Moderation Action)
+ * - Action 'approve': Sets status to 'approved'
+ * - Action 'reject': Sets status to 'rejected'
+ * - Action 'edit': Updates question fields and sets status to 'approved'
+ */
+export const reviewQuizQuestion = async (
+  questionId: string,
+  action: ReviewAction,
+  updateData?: IEditQuizQuestionPayload,
+) => {
+  if (!Types.ObjectId.isValid(questionId)) {
+    throw new AppError("Invalid question ID format", 400);
+  }
+
+  const question = await QuizQuestionModel.findById(questionId);
+  if (!question) {
+    throw new AppError("Quiz question not found", 404);
+  }
+
+  if (action === "approve") {
+    question.status = QuestionStatus.APPROVED;
+    question.verificationStatus = VerificationStatus.VERIFIED;
+  } else if (action === "reject") {
+    question.status = QuestionStatus.REJECTED;
+  } else if (action === "edit") {
+    if (updateData?.questionText) question.questionText = updateData.questionText.trim();
+    if (updateData?.options && Array.isArray(updateData.options)) {
+      question.options = updateData.options.map((o) => String(o).trim());
+    }
+    if (updateData?.correctAnswer !== undefined) {
+      question.correctAnswer = updateData.correctAnswer;
+    }
+    if (updateData?.explanation) question.explanation = updateData.explanation.trim();
+    if (updateData?.codeSnippet) question.codeSnippet = updateData.codeSnippet;
+    if (updateData?.topic) question.topic = updateData.topic.trim().toLowerCase();
+    if (updateData?.difficulty) question.difficulty = updateData.difficulty;
+
+    question.status = QuestionStatus.APPROVED;
+    question.verificationStatus = VerificationStatus.VERIFIED;
+  } else {
+    throw new AppError("Invalid review action", 400);
+  }
+
+  await question.save();
+  return question;
+};
+
+/**
+ * 7. Non-blocking Async Quiz Generation Trigger (Background Worker)
+ * - Returns immediately to HTTP caller, runs pipeline in background setImmediate task
+ */
+export const triggerAsyncQuizGeneration = (options: {
+  topic: string;
+  difficulty: QuestionDifficulty;
+  count?: number;
+  type?: QuestionType;
+}) => {
+  setImmediate(async () => {
+    try {
+      console.log(
+        `[Quiz Background Worker] Starting batch generation: topic=${options.topic}, difficulty=${options.difficulty}...`,
+      );
+      const result = await generateAndIngestQuizBatch(options);
+      console.log(
+        `[Quiz Background Worker] Success: ${result.insertedCount} questions verified & added to review queue.`,
+      );
+    } catch (err: any) {
+      console.error(
+        `[Quiz Background Worker Error]: ${err?.message || err}`,
+      );
+    }
+  });
 };
