@@ -56,6 +56,11 @@ const quizSessionSchema = new Schema<IQuizSession>(
       default: 0,
       min: 0,
     },
+    earnedGems: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     totalQuestions: {
       type: Number,
       required: true,

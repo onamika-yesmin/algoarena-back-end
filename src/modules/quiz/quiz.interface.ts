@@ -82,6 +82,7 @@ export interface IQuizSession extends Document {
   questions: ISessionQuestion[];
   score: number;
   totalQuestions: number;
+  earnedGems?: number;
   startedAt: Date;
   expiresAt?: Date;
   completedAt?: Date;
