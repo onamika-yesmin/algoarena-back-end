@@ -8,6 +8,7 @@ import {
   startQuizSession,
   submitQuizAnswers,
   getQuizSessionResult,
+  generateAndIngestQuizBatch,
 } from "./quiz.service.js";
 import { IStartQuizRequest, ISubmitQuizRequest } from "./quiz.interface.js";
 
@@ -84,8 +85,32 @@ const getQuizResult = catchAsync(
   },
 );
 
+/**
+ * POST /api/quiz/admin/generate-bulk
+ * - Admin trigger for AI bulk question generation & verification pipeline
+ */
+const generateBulk = catchAsync(
+  async (req: AuthenticatedRequest, res: Response) => {
+    const { topic, difficulty, count, type } = req.body;
+    const result = await generateAndIngestQuizBatch({
+      topic,
+      difficulty,
+      count,
+      type,
+    });
+
+    sendResponse(res, {
+      success: true,
+      statusCode: httpStatus.CREATED,
+      message: `AI Quiz generation complete. ${result.insertedCount} questions verified and stored.`,
+      data: result,
+    });
+  },
+);
+
 export const quizController = {
   startQuiz,
   submitQuiz,
   getQuizResult,
+  generateBulk,
 };

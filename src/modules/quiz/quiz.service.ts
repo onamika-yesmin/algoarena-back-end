@@ -11,9 +11,12 @@ import {
   ISessionQuestion,
   QuestionDifficulty,
   QuestionStatus,
+  QuestionType,
   SessionMode,
   SessionStatus,
 } from "./quiz.interface.js";
+import { quizGenerator } from "./quiz.generator.js";
+import { quizVerifier } from "./quiz.verifier.js";
 
 // Seconds per question by difficulty for EXAM mode timers
 const SECONDS_PER_QUESTION: Record<QuestionDifficulty, number> = {
@@ -336,5 +339,43 @@ export const getQuizSessionResult = async (
     expiresAt: session.expiresAt,
     completedAt: session.completedAt,
     questions: detailedQuestions,
+  };
+};
+
+/**
+ * 4. Bulk Question Generation & Ingestion Pipeline (Admin Workflow)
+ * - Generates questions via quizGenerator
+ * - Runs two-tier verification via quizVerifier (Judge0 sandbox & Secondary AI audit)
+ * - Saves verified questions into MongoDB with status 'pending_review'
+ */
+export const generateAndIngestQuizBatch = async (options: {
+  topic: string;
+  difficulty: QuestionDifficulty;
+  count?: number;
+  type?: QuestionType;
+}) => {
+  // Step 1: Generate batch using AI generator
+  const genResult = await quizGenerator.generateQuestionsBatch(options);
+
+  // Step 2: Run verification pipeline (Deduplication + Judge0 + Secondary AI)
+  const verifyResult = await quizVerifier.verifyQuestionsBatch(
+    genResult.questions,
+  );
+
+  let insertedDocs: IQuizQuestion[] = [];
+  if (verifyResult.verifiedQuestions.length > 0) {
+    // Step 3: Insert verified questions into MongoDB
+    insertedDocs = (await QuizQuestionModel.insertMany(
+      verifyResult.verifiedQuestions,
+    )) as unknown as IQuizQuestion[];
+  }
+
+  return {
+    requestedCount: genResult.requestedCount,
+    generatedCount: genResult.questions.length,
+    insertedCount: insertedDocs.length,
+    skippedDuplicatesCount: verifyResult.skippedDuplicatesCount,
+    failedVerificationCount: verifyResult.failedVerificationCount,
+    questions: insertedDocs,
   };
 };
